@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Verfolger – Block-Falle & Abstand</title>
+  <title>Verfolger-Spiel – Joystick</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <style>
     html, body {
@@ -14,9 +14,9 @@
     }
     canvas {
       display: block;
-      margin: 0 auto;
       background: #111;
       border: 2px solid #444;
+      margin: 0 auto;
     }
     .overlay {
       position: absolute;
@@ -47,9 +47,49 @@
     #gameOverScreen, #levelCompleteScreen {
       display: none;
     }
+
+    /* Joystick-Stil */
+    #joystick-container {
+      position: absolute;
+      bottom: 30px;
+      left: 30px;
+      width: 120px;
+      height: 120px;
+      background: rgba(255,255,255,0.05);
+      border: 2px solid #666;
+      border-radius: 50%;
+      touch-action: none;
+    }
+
+    #joystick {
+      width: 60px;
+      height: 60px;
+      background: limegreen;
+      border-radius: 50%;
+      position: absolute;
+      top: 30px;
+      left: 30px;
+      touch-action: none;
+    }
+
+    #jump-button {
+      position: absolute;
+      bottom: 40px;
+      right: 30px;
+      width: 80px;
+      height: 80px;
+      background: limegreen;
+      color: black;
+      font-size: 24px;
+      font-weight: bold;
+      border-radius: 50%;
+      border: none;
+      opacity: 0.85;
+    }
   </style>
 </head>
 <body>
+  <!-- Overlays -->
   <div id="startScreen" class="overlay">
     <h1>Verfolger-Spiel</h1>
     <button id="startButton">Start</button>
@@ -67,7 +107,14 @@
     <button onclick="location.reload()">Neustarten</button>
   </div>
 
+  <!-- Canvas -->
   <canvas id="gameCanvas"></canvas>
+
+  <!-- Mobile Steuerung -->
+  <div id="joystick-container" style="display:none;">
+    <div id="joystick"></div>
+  </div>
+  <button id="jump-button" style="display:none;">⤒</button>
 
   <script>
     const canvas = document.getElementById("gameCanvas");
@@ -76,6 +123,7 @@
     const keys = {};
     const blocks = [];
     const MIN_DISTANCE = 60;
+    const joystick = { x: 0, active: false };
 
     let player, chaser;
     let gameRunning = false;
@@ -207,7 +255,6 @@
       const dy = player.y - chaser.y;
       const dist = Math.hypot(dx, dy);
 
-      // Wenn Spieler blockiert ist, Verfolger darf aufholen
       if (dist > (player.blocked ? 1 : MIN_DISTANCE)) {
         chaser.x += (dx / dist) * chaser.speed;
         chaser.y += (dy / dist) * chaser.speed;
@@ -235,8 +282,6 @@
 
         if (collided) {
           entity.blocked = true;
-
-          // einfache Kollision von oben
           if (entity.velY > 0) {
             entity.y = block.y - entity.height;
             entity.velY = 0;
@@ -325,7 +370,6 @@
       gameLoopId = requestAnimationFrame(gameLoop);
     }
 
-    // Steuerung
     document.addEventListener("keydown", (e) => keys[e.key.toLowerCase()] = true);
     document.addEventListener("keyup", (e) => keys[e.key.toLowerCase()] = false);
 
@@ -354,6 +398,48 @@
       }, levelDuration);
       gameLoop();
     });
+
+    // Touch-Steuerung
+    const joystickEl = document.getElementById("joystick");
+    const containerEl = document.getElementById("joystick-container");
+
+    let startX = 0;
+    joystickEl.addEventListener("touchstart", (e) => {
+      joystick.active = true;
+      startX = e.touches[0].clientX;
+    });
+
+    joystickEl.addEventListener("touchmove", (e) => {
+      const dx = e.touches[0].clientX - startX;
+      if (dx < -20) {
+        keys["a"] = true;
+        keys["d"] = false;
+      } else if (dx > 20) {
+        keys["d"] = true;
+        keys["a"] = false;
+      } else {
+        keys["a"] = false;
+        keys["d"] = false;
+      }
+    });
+
+    joystickEl.addEventListener("touchend", () => {
+      keys["a"] = false;
+      keys["d"] = false;
+    });
+
+    document.getElementById("jump-button").addEventListener("touchstart", () => {
+      keys["w"] = true;
+    });
+
+    document.getElementById("jump-button").addEventListener("touchend", () => {
+      keys["w"] = false;
+    });
+
+    if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+      containerEl.style.display = "block";
+      document.getElementById("jump-button").style.display = "block";
+    }
 
     resetGameState();
   </script>
