@@ -1,1 +1,305 @@
-[FULL GAME HTML OMITTED FOR BREVITY - already written above]
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Verfolger-Spiel</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background: #111;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(#222, #000);
+    }
+    #startScreen, #gameOverScreen, #levelCompleteScreen {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.85);
+      color: white;
+      font-size: 24px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      z-index: 10;
+    }
+    #jump-button {
+      position: absolute;
+      bottom: 50px;
+      right: 80px;
+      width: 80px;
+      height: 80px;
+      background: radial-gradient(circle at 30% 30%, #99ff99, #005500);
+      border: 2px solid #003300;
+      border-radius: 50%;
+      font-size: 28px;
+      color: white;
+      box-shadow:
+        inset 0 5px 10px rgba(255,255,255,0.4),
+        0 8px 18px rgba(0,0,0,0.7),
+        0 4px 6px rgba(0,255,0,0.4);
+    }
+    #joystick-zone {
+      position: absolute;
+      bottom: 30px;
+      left: 30px;
+      width: 120px;
+      height: 120px;
+    }
+    button {
+      font-size: 24px;
+      padding: 15px 30px;
+      margin-top: 20px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Bildschirme -->
+  <div id="startScreen">
+    <div>Willkommen zum Verfolger-Spiel</div>
+    <button id="startButton">Start</button>
+  </div>
+  <div id="gameOverScreen" style="display:none;">
+    <div>Game Over</div>
+    <button onclick="location.reload()">Erneut versuchen</button>
+  </div>
+  <div id="levelCompleteScreen" style="display:none;">
+    <div>Level geschafft!</div>
+    <button onclick="location.reload()">Weiter</button>
+  </div>
+
+  <!-- Steuerung -->
+  <div id="joystick-zone"></div>
+  <button id="jump-button">↑</button>
+
+  <!-- Joystick-Bibliothek -->
+  <script src="https://cdn.jsdelivr.net/npm/nipplejs@0.9.0/dist/nipplejs.min.js"></script>
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let player, chaser, blocks = [], particles = [];
+    let score = 0, gameRunning = false, teleporting = false;
+    let blockInterval, scoreInterval, levelTimer;
+    const levelDuration = 60000; // 1 Minute
+
+    const destroySound = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQgAAAAA');
+
+    function resetGameState() {
+      blocks = [];
+      particles = [];
+      score = 0;
+      player = {
+        x: 100, y: canvas.height/2, width: 50, height: 50,
+        velX: 4, velY: 0, grounded: false, jumpForce: 12
+      };
+      chaser = {
+        x: 0, y: canvas.height/2, width: 50, height: 50,
+        velY: 0
+      };
+    }
+
+    function getWallHeight() {
+      return canvas.height * 0.2;
+    }
+
+    function spawnBlock() {
+      const top = Math.random() < 0.5;
+      blocks.push({
+        x: canvas.width + 60,
+        y: top ? getWallHeight() + Math.random() * 100
+               : canvas.height - getWallHeight() - 60 - Math.random() * 100,
+        width: 60,
+        height: 60,
+        visible: true
+      });
+    }
+
+    function drawRect(obj) {
+      if (obj.visible === false) return;
+      ctx.fillStyle = "#888";
+      ctx.fillRect(obj.x, obj.y, obj.width, obj.height);
+      ctx.fillStyle = "#333";
+      ctx.beginPath();
+      ctx.moveTo(obj.x + obj.width, obj.y);
+      ctx.lineTo(obj.x + obj.width + 6, obj.y - 6);
+      ctx.lineTo(obj.x + obj.width + 6, obj.y + obj.height - 6);
+      ctx.lineTo(obj.x + obj.width, obj.y + obj.height);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = "#aaa";
+      ctx.beginPath();
+      ctx.moveTo(obj.x, obj.y);
+      ctx.lineTo(obj.x + 6, obj.y - 6);
+      ctx.lineTo(obj.x + obj.width + 6, obj.y - 6);
+      ctx.lineTo(obj.x + obj.width, obj.y);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function drawParticles() {
+      for (let p of particles) {
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 3, 3);
+      }
+    }
+
+    function updateParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.2;
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+    }
+
+    function spawnParticles(x, y) {
+      for (let i = 0; i < 10; i++) {
+        particles.push({
+          x: x, y: y,
+          vx: (Math.random() - 0.5) * 4,
+          vy: (Math.random() - 0.5) * 4,
+          life: 30,
+          color: "orange"
+        });
+      }
+    }
+
+    function checkBlockCollisions(entity) {
+      entity.grounded = false;
+      for (let block of blocks) {
+        const hit = entity.x < block.x + block.width &&
+                    entity.x + entity.width > block.x &&
+                    entity.y < block.y + block.height &&
+                    entity.y + entity.height > block.y;
+        if (hit && entity.velY > 0) {
+          entity.y = block.y - entity.height;
+          entity.velY = 0;
+          entity.grounded = true;
+        }
+      }
+      const floor = canvas.height - getWallHeight() - entity.height;
+      if (entity.y >= floor) {
+        entity.y = floor;
+        entity.velY = 0;
+        entity.grounded = true;
+      }
+    }
+
+    function destroyBlocksOnContact(chaser) {
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        const b = blocks[i];
+        const hit = chaser.x < b.x + b.width &&
+                    chaser.x + chaser.width > b.x &&
+                    chaser.y < b.y + b.height &&
+                    chaser.y + chaser.height > b.y;
+        if (hit) {
+          let flashes = 4;
+          const interval = setInterval(() => {
+            b.visible = !b.visible;
+            if (--flashes <= 0) {
+              clearInterval(interval);
+              spawnParticles(b.x + b.width/2, b.y + b.height/2);
+              destroySound.play();
+              blocks.splice(i, 1);
+            }
+          }, 60);
+        }
+      }
+    }
+
+    function drawScore() {
+      ctx.fillStyle = "white";
+      ctx.font = "24px sans-serif";
+      ctx.fillText("Punkte: " + score, 20, 30);
+    }
+
+    function gameLoop() {
+      if (!gameRunning) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      player.velY += 0.6;
+      player.y += player.velY;
+      chaser.y += chaser.velY;
+      player.x += player.velX;
+      chaser.x = player.x - 180;
+
+      checkBlockCollisions(player);
+      checkBlockCollisions(chaser);
+      destroyBlocksOnContact(chaser);
+
+      for (let b of blocks) {
+        b.x -= 4;
+        drawRect(b);
+      }
+
+      updateParticles();
+      drawParticles();
+      drawRect(player);
+      drawRect(chaser);
+      drawScore();
+
+      if (!teleporting && chaser.x + chaser.width > player.x) {
+        gameRunning = false;
+        document.getElementById("gameOverScreen").style.display = "flex";
+        return;
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+
+    function levelWon() {
+      teleporting = true;
+      gameRunning = false;
+      document.getElementById("levelCompleteScreen").style.display = "flex";
+    }
+
+    document.getElementById("startButton").addEventListener("click", () => {
+      document.getElementById("startScreen").style.display = "none";
+      resetGameState();
+      gameRunning = true;
+      teleporting = false;
+      blockInterval = setInterval(spawnBlock, 1500);
+      scoreInterval = setInterval(() => score++, 100);
+      levelTimer = setTimeout(() => { if (gameRunning) levelWon(); }, levelDuration);
+      gameLoop();
+    });
+
+    document.getElementById("jump-button").addEventListener("touchstart", () => {
+      if (player.grounded) {
+        player.velY = -player.jumpForce;
+        player.grounded = false;
+      }
+    });
+
+    let manager = nipplejs.create({
+      zone: document.getElementById('joystick-zone'),
+      mode: 'static',
+      position: { left: '60px', bottom: '60px' },
+      color: 'lime'
+    });
+
+    manager.on("dir", (evt, data) => {
+      if (data.direction && data.direction.y === "up") {
+        if (player.grounded) {
+          player.velY = -player.jumpForce;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
